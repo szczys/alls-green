@@ -10,6 +10,7 @@ import typing as _t
 
 _T = _t.TypeVar('_T')
 FILE_APPEND_MODE = 'a'
+ACTION_SUMMARY_OUTPUT_OPTIONS = ['all', 'none', 'quiet-on-success']
 
 
 class ActionJobInputType(_t.TypedDict):  # noqa: D101
@@ -21,6 +22,7 @@ class ActionInputsType(_t.TypedDict):  # noqa: D101
     allowed_failures: list[str]
     allowed_skips: list[str]
     jobs: dict[str, ActionJobInputType]
+    action_summary_output: str
 
 
 def write_lines_to_streams(  # noqa: D103
@@ -31,12 +33,6 @@ def write_lines_to_streams(  # noqa: D103
     for stream in streams:
         stream.writelines(eoled_lines)
         stream.flush()
-
-
-def print_lines_to_stdout(lines: _t.Iterable[str]) -> None:
-    """Print output when not using streams."""
-    for line in lines:
-        sys.stdout.write(line)
 
 
 def set_gha_output(name: str, value: str) -> None:
@@ -83,6 +79,7 @@ def parse_inputs(
     raw_allowed_failures: str,
     raw_allowed_skips: str,
     raw_jobs: str,
+    raw_action_summary: str,
 ) -> ActionInputsType:
     """Normalize the action inputs by turning them into data."""
     allowed_failures_input = drop_empty_from_list(
@@ -96,6 +93,7 @@ def parse_inputs(
         'allowed_failures': allowed_failures_input,
         'allowed_skips': allowed_skips_input,
         'jobs': _t.cast('dict[str, ActionJobInputType]', json.loads(raw_jobs)),
+        'action_summary_output': raw_action_summary
     }
 
 
@@ -105,6 +103,7 @@ def log_decision_details(
     jobs_allowed_to_be_skipped: _t.Iterable[str],
     allowed_to_fail_jobs_succeeded: bool,
     allowed_to_be_skipped_jobs_succeeded: bool,
+    action_summary_output: str,
     jobs: dict[str, ActionJobInputType],
     summary_file_streams: _t.Iterable[_t.TextIO],
 ) -> None:
@@ -157,12 +156,16 @@ def log_decision_details(
             ),
         }
 
-    # Only report status if it failed
-    if job_matrix_succeeded:
-        print_lines_to_stdout(markdown_summary_lines)
-        return
+    if (
+        action_summary_output == 'none'
+        or (job_matrix_succeeded
+        and action_summary_output == 'quiet-on-success')
+    ):
+        configured_streams = [_t.cast('_t.TextIO', sys.stderr)]
+    else:
+        configured_streams = summary_file_streams
 
-    write_lines_to_streams(markdown_summary_lines, summary_file_streams)
+    write_lines_to_streams(markdown_summary_lines, configured_streams)
 
 
 def main(argv: list[str]) -> int:
@@ -171,6 +174,7 @@ def main(argv: list[str]) -> int:
         raw_allowed_failures=argv[1],
         raw_allowed_skips=argv[2],
         raw_jobs=argv[3],
+        raw_action_summary=argv[4],
     )
     summary_file_path = pathlib.Path(os.environ['GITHUB_STEP_SUMMARY'])
 
@@ -186,6 +190,25 @@ def main(argv: list[str]) -> int:
                 (
                     '# ❌ Invalid input jobs matrix, '
                     'please provide a non-empty `needs` context',
+                ),
+                (
+                    _t.cast('_t.TextIO', sys.stderr),
+                    _t.cast('_t.TextIO', summary_file),
+                ),
+            )
+        return 1
+
+    action_summary_output = inputs['action_summary_output']
+
+    if action_summary_output not in ACTION_SUMMARY_OUTPUT_OPTIONS:
+        with summary_file_path.open(  # type: ignore[misc]
+            mode=FILE_APPEND_MODE,
+        ) as summary_file:
+            write_lines_to_streams(
+                (
+                    '# ❌ Invalid action-summary-output: '
+                    f'{action_summary_output}, '
+                    f'Expected: {ACTION_SUMMARY_OUTPUT_OPTIONS}',
                 ),
                 (
                     _t.cast('_t.TextIO', sys.stderr),
@@ -226,11 +249,12 @@ def main(argv: list[str]) -> int:
             jobs_allowed_to_be_skipped,
             allowed_to_fail_jobs_succeeded,
             allowed_to_be_skipped_jobs_succeeded,
+            action_summary_output,
             jobs,
             summary_file_streams=(
                 sys.stderr,
                 _t.cast('_t.TextIO', summary_file),
-            ),
+            )
         )
 
     return int(not job_matrix_succeeded)

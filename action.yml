@@ -30,6 +30,17 @@ inputs:
       Job names that are allowed to be skipped and not affect the
       outcome, as a comma-separated list or serialized as a JSON string
     required: false
+  action-summary-output:
+    default: >-
+      all
+    description: >-
+      Behavior to use for publishing outcome to the Github action summary page
+
+      Available Options:
+        all
+        none
+        quiet-on-success
+    required: false
 
 outputs:
   failure:
@@ -62,6 +73,7 @@ runs:
       "$(cat << EOM
         ${{ inputs.jobs }}
       EOM
-      )"
+      )" \
+      "${{ inputs.action-summary-output }}"
     shell: bash
 ...
