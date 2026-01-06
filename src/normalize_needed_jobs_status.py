@@ -33,6 +33,12 @@ def write_lines_to_streams(  # noqa: D103
         stream.flush()
 
 
+def print_lines_to_stdout(lines: _t.Iterable[str]) -> None:
+    """Print output when not using streams."""
+    for line in lines:
+        sys.stdout.write(line)
+
+
 def set_gha_output(name: str, value: str) -> None:
     """Set an action output using an environment file.
 
@@ -150,6 +156,11 @@ def log_decision_details(
                 else 'required to succeed or be skipped',
             ),
         }
+
+    # Only report status if it failed
+    if job_matrix_succeeded:
+        print_lines_to_stdout(markdown_summary_lines)
+        return
 
     write_lines_to_streams(markdown_summary_lines, summary_file_streams)
 
